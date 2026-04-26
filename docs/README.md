@@ -6,3 +6,4 @@
 - [Determinism Model](determinism.md)
 - [Development](development.md)
 - [Release Process](release.md)
+- [GitHub Setup](github.md)
