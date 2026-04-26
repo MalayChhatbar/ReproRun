@@ -15,9 +15,9 @@ resolver = "2"
 edition = "2021"
 rust-version = "1.75"
 license = "MIT"
-repository = "https://github.com/your-org/reprorun"
-homepage = "https://github.com/your-org/reprorun"
-documentation = "https://github.com/your-org/reprorun/tree/master/docs"
+repository = "https://github.com/MalayChhatbar/reprorun"
+homepage = "https://github.com/MalayChhatbar/reprorun"
+documentation = "https://github.com/MalayChhatbar/reprorun/tree/master/docs"
 readme = "README.md"
 
 [workspace.dependencies]
