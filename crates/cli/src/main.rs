@@ -8,9 +8,24 @@ use reprorun_core::{
 };
 use reprorun_reporter::{render_diff_human, render_diff_json};
 
+const VERSION: &str = concat!(env!("CARGO_PKG_VERSION"), "+", env!("REPRORUN_GIT_SHA_SHORT"));
+const LONG_VERSION: &str = concat!(
+    env!("CARGO_PKG_VERSION"),
+    "\ncommit: ",
+    env!("REPRORUN_GIT_SHA"),
+    "\nshort: ",
+    env!("REPRORUN_GIT_SHA_SHORT"),
+    "\ntag: ",
+    env!("REPRORUN_GIT_TAG"),
+    "\ndirty: ",
+    env!("REPRORUN_GIT_DIRTY")
+);
+
 #[derive(Debug, Parser)]
 #[command(
     name = "repro",
+    version = VERSION,
+    long_version = LONG_VERSION,
     about = "Deterministic command execution with reproducible outputs"
 )]
 struct Cli {
@@ -274,5 +289,13 @@ mod tests {
         let content = std::fs::read_to_string(path).expect("read config");
         assert!(content.contains("hello from ReproRun"));
         assert!(!content.contains("existing: true"));
+    }
+
+    #[test]
+    fn version_metadata_is_embedded() {
+        assert!(VERSION.contains(env!("CARGO_PKG_VERSION")));
+        assert!(LONG_VERSION.contains("commit:"));
+        assert!(LONG_VERSION.contains("tag:"));
+        assert!(LONG_VERSION.contains("dirty:"));
     }
 }
