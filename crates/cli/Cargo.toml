@@ -1,0 +1,15 @@
+[package]
+name = "cli"
+version = "0.1.0"
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+
+[dependencies]
+anyhow.workspace = true
+clap.workspace = true
+reprorun-cache = { path = "../cache" }
+reprorun-config = { path = "../config" }
+reprorun-core = { path = "../core" }
+reprorun-reporter = { path = "../reporter" }
+serde_json.workspace = true
