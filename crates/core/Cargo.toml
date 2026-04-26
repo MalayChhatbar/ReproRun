@@ -7,9 +7,15 @@ license.workspace = true
 
 [dependencies]
 anyhow.workspace = true
+blake3.workspace = true
 reprorun-cache = { path = "../cache" }
 reprorun-config = { path = "../config" }
 reprorun-executor = { path = "../executor" }
 reprorun-hasher = { path = "../hasher" }
 reprorun-reporter = { path = "../reporter" }
 reprorun-sandbox = { path = "../sandbox" }
+serde_json.workspace = true
+walkdir.workspace = true
+
+[dev-dependencies]
+tempfile = "3.13"
