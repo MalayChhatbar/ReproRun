@@ -40,6 +40,7 @@ cargo run -p reprorun-cli -- check examples/flaky.yaml
 ## CLI
 
 ```text
+repro init [path] [--force]
 repro run [config]
 repro check [config]
 repro diff <hash1> <hash2>
