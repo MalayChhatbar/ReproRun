@@ -161,9 +161,7 @@ mod tests {
         let mut input = basic_input(dir.path().to_path_buf());
 
         let first = hash_run_input(&input, std::slice::from_ref(&file_path)).unwrap();
-        input
-            .env
-            .insert("DEBUG".to_string(), "true".to_string());
+        input.env.insert("DEBUG".to_string(), "true".to_string());
         let second = hash_run_input(&input, &[file_path]).unwrap();
         assert_ne!(first, second);
     }

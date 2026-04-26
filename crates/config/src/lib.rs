@@ -108,7 +108,9 @@ impl ReproConfig {
         }
 
         if self.check.runs == 0 {
-            return Err(ConfigError::Validation("check.runs must be >= 1".to_string()));
+            return Err(ConfigError::Validation(
+                "check.runs must be >= 1".to_string(),
+            ));
         }
 
         Ok(())
@@ -194,17 +196,11 @@ pub struct DeterminismConfig {
     pub time_epoch: Option<i64>,
 }
 
-#[derive(Debug, Clone, Deserialize, Serialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Deserialize, Serialize, PartialEq, Eq, Default)]
 #[serde(deny_unknown_fields)]
 pub struct NetworkConfig {
     #[serde(default)]
     pub enabled: bool,
-}
-
-impl Default for NetworkConfig {
-    fn default() -> Self {
-        Self { enabled: false }
-    }
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize, PartialEq, Eq)]
@@ -275,7 +271,10 @@ mod tests {
             CommandSpec::Argv(vec!["echo".to_string(), "hello".to_string()])
         );
         assert_eq!(cfg.filesystem.mode, FilesystemMode::Sandbox);
-        assert_eq!(cfg.filesystem.snapshot_max_bytes, DEFAULT_SNAPSHOT_MAX_BYTES);
+        assert_eq!(
+            cfg.filesystem.snapshot_max_bytes,
+            DEFAULT_SNAPSHOT_MAX_BYTES
+        );
         assert_eq!(cfg.limits.output_max_bytes, DEFAULT_OUTPUT_MAX_BYTES);
         assert_eq!(cfg.check.runs, DEFAULT_CHECK_RUNS);
         assert!(!cfg.network.enabled);

@@ -7,7 +7,10 @@ use thiserror::Error;
 #[derive(Debug, Error)]
 pub enum SandboxError {
     #[error("sandbox path resolution failed for '{path}': {source}")]
-    Canonicalize { path: String, source: std::io::Error },
+    Canonicalize {
+        path: String,
+        source: std::io::Error,
+    },
     #[error("path '{path}' is denied by policy")]
     DeniedPath { path: String },
     #[error("path '{path}' is outside allowlist")]
@@ -25,7 +28,10 @@ pub struct SandboxLayout {
     pub total_snapshot_bytes: u64,
 }
 
-pub fn prepare_sandbox(base_dir: &Path, config: &ReproConfig) -> Result<SandboxLayout, SandboxError> {
+pub fn prepare_sandbox(
+    base_dir: &Path,
+    config: &ReproConfig,
+) -> Result<SandboxLayout, SandboxError> {
     let tmp_root = base_dir.join("tmp").join("sandbox");
     fs::create_dir_all(&tmp_root)?;
     let run_id = std::time::SystemTime::now()
@@ -41,7 +47,12 @@ pub fn prepare_sandbox(base_dir: &Path, config: &ReproConfig) -> Result<SandboxL
         FilesystemMode::Sandbox | FilesystemMode::Snapshot
     ) {
         for allow in &config.filesystem.allow {
-            let resolved = resolve_checked_path(base_dir, allow, &config.filesystem.allow, &config.filesystem.deny)?;
+            let resolved = resolve_checked_path(
+                base_dir,
+                allow,
+                &config.filesystem.allow,
+                &config.filesystem.deny,
+            )?;
             total = total.saturating_add(copy_into_snapshot(base_dir, &resolved, &snapshot_root)?);
             if total > config.filesystem.snapshot_max_bytes {
                 return Err(SandboxError::SnapshotTooLarge {
@@ -70,12 +81,13 @@ pub fn resolve_checked_path(
     } else {
         base_dir.join(candidate)
     };
-    let resolved = absolute_candidate
-        .canonicalize()
-        .map_err(|source| SandboxError::Canonicalize {
-            path: candidate.display().to_string(),
-            source,
-        })?;
+    let resolved =
+        absolute_candidate
+            .canonicalize()
+            .map_err(|source| SandboxError::Canonicalize {
+                path: candidate.display().to_string(),
+                source,
+            })?;
 
     let resolved_deny = canonicalize_list(base_dir, denylist)?;
     if resolved_deny.iter().any(|deny| resolved.starts_with(deny)) {
@@ -85,7 +97,10 @@ pub fn resolve_checked_path(
     }
 
     let resolved_allow = canonicalize_list(base_dir, allowlist)?;
-    if !resolved_allow.is_empty() && !resolved_allow.iter().any(|allow| resolved.starts_with(allow))
+    if !resolved_allow.is_empty()
+        && !resolved_allow
+            .iter()
+            .any(|allow| resolved.starts_with(allow))
     {
         return Err(SandboxError::OutsideAllowlist {
             path: resolved.display().to_string(),
@@ -114,11 +129,17 @@ fn canonicalize_list(base_dir: &Path, paths: &[PathBuf]) -> Result<Vec<PathBuf>,
         .collect()
 }
 
-fn copy_into_snapshot(base_dir: &Path, source: &Path, snapshot_root: &Path) -> Result<u64, SandboxError> {
-    let canonical_base = base_dir.canonicalize().map_err(|source| SandboxError::Canonicalize {
-        path: base_dir.display().to_string(),
-        source,
-    })?;
+fn copy_into_snapshot(
+    base_dir: &Path,
+    source: &Path,
+    snapshot_root: &Path,
+) -> Result<u64, SandboxError> {
+    let canonical_base = base_dir
+        .canonicalize()
+        .map_err(|source| SandboxError::Canonicalize {
+            path: base_dir.display().to_string(),
+            source,
+        })?;
     let mut copied = 0_u64;
     if source.is_file() {
         let rel = relative_to_base(&canonical_base, source);
@@ -149,7 +170,7 @@ fn copy_into_snapshot(base_dir: &Path, source: &Path, snapshot_root: &Path) -> R
     Ok(copied)
 }
 
-fn relative_to_base<'a>(base: &Path, path: &'a Path) -> PathBuf {
+fn relative_to_base(base: &Path, path: &Path) -> PathBuf {
     if let Ok(rel) = path.strip_prefix(base) {
         return rel.to_path_buf();
     }

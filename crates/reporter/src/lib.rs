@@ -78,12 +78,10 @@ pub fn render_diff_human(diff: &RunDiff, color: bool) -> String {
     let mut out = String::new();
     if diff.exit_code.different {
         out.push_str("## Exit Code\n");
-        out.push_str(
-            &decorate_diff(
-                diff.exit_code.unified.as_deref().unwrap_or_default(),
-                color,
-            ),
-        );
+        out.push_str(&decorate_diff(
+            diff.exit_code.unified.as_deref().unwrap_or_default(),
+            color,
+        ));
         out.push('\n');
     }
     if diff.stdout.different {

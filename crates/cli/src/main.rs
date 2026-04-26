@@ -3,11 +3,16 @@ use std::path::{Path, PathBuf};
 use anyhow::{Context, Result};
 use clap::{Args, Parser, Subcommand};
 use reprorun_cache::{clean_cache, prune_cache_by_size};
-use reprorun_core::{check_from_yaml, diff_runs_by_hash, load_config_from_file, run_from_yaml, RunOptions};
+use reprorun_core::{
+    check_from_yaml, diff_runs_by_hash, load_config_from_file, run_from_yaml, RunOptions,
+};
 use reprorun_reporter::{render_diff_human, render_diff_json};
 
 #[derive(Debug, Parser)]
-#[command(name = "repro", about = "Deterministic command execution with reproducible outputs")]
+#[command(
+    name = "repro",
+    about = "Deterministic command execution with reproducible outputs"
+)]
 struct Cli {
     #[arg(short = 'q', long = "quiet", global = true)]
     quiet: bool,
@@ -139,7 +144,10 @@ fn cmd_check(base_dir: &Path, cmd: &CheckCommand) -> Result<()> {
     } else {
         println!("deterministic: {}", check.deterministic);
         for (idx, run) in check.runs.iter().enumerate() {
-            println!("run[{idx}] hash={} exit={:?}", run.hash, run.result.exit_code);
+            println!(
+                "run[{idx}] hash={} exit={:?}",
+                run.hash, run.result.exit_code
+            );
         }
         if let Some(diff) = &check.first_diff {
             println!("{}", render_diff_human(diff, true));
