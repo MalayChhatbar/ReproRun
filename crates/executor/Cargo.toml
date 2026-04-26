@@ -8,3 +8,4 @@ license.workspace = true
 [dependencies]
 anyhow.workspace = true
 reprorun-config = { path = "../config" }
+thiserror.workspace = true
