@@ -24,11 +24,12 @@ pub struct CachedRunData {
     pub env_json: String,
 }
 
-pub fn run_dir(base_dir: &Path, hash: &str) -> PathBuf {
+fn run_dir(base_dir: &Path, hash: &str) -> PathBuf {
     base_dir.join(".runs").join(hash)
 }
 
 pub fn load_run(base_dir: &Path, hash: &str) -> Result<Option<CachedRunData>> {
+    validate_hash(hash)?;
     let dir = run_dir(base_dir, hash);
     if !dir.exists() {
         return Ok(None);
@@ -56,6 +57,7 @@ pub fn load_run(base_dir: &Path, hash: &str) -> Result<Option<CachedRunData>> {
 }
 
 pub fn store_run(base_dir: &Path, run: &CachedRunData) -> Result<PathBuf> {
+    validate_hash(&run.metadata.hash)?;
     let dir = run_dir(base_dir, &run.metadata.hash);
     fs::create_dir_all(&dir).with_context(|| {
         format!(
@@ -76,6 +78,9 @@ pub fn store_run(base_dir: &Path, run: &CachedRunData) -> Result<PathBuf> {
 }
 
 pub fn has_run(base_dir: &Path, hash: &str) -> bool {
+    if validate_hash(hash).is_err() {
+        return false;
+    }
     run_dir(base_dir, hash).exists()
 }
 
@@ -142,10 +147,24 @@ fn dir_size(path: &Path) -> Result<u64> {
     Ok(total)
 }
 
+fn validate_hash(hash: &str) -> Result<()> {
+    if hash.len() != 64 {
+        anyhow::bail!("invalid run hash: expected 64 hex chars");
+    }
+    if !hash.chars().all(|c| c.is_ascii_hexdigit()) {
+        anyhow::bail!("invalid run hash: only hex characters are allowed");
+    }
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
     use tempfile::tempdir;
+
+    fn hash(ch: char) -> String {
+        std::iter::repeat_n(ch, 64).collect()
+    }
 
     fn sample(hash: &str, payload_size: usize) -> CachedRunData {
         CachedRunData {
@@ -167,24 +186,24 @@ mod tests {
     #[test]
     fn store_and_load_round_trip() {
         let dir = tempdir().unwrap();
-        let run = sample("abc", 16);
+        let run = sample(&hash('a'), 16);
         store_run(dir.path(), &run).unwrap();
-        let loaded = load_run(dir.path(), "abc").unwrap().unwrap();
+        let loaded = load_run(dir.path(), &hash('a')).unwrap().unwrap();
         assert_eq!(loaded, run);
     }
 
     #[test]
     fn has_run_reports_presence() {
         let dir = tempdir().unwrap();
-        assert!(!has_run(dir.path(), "abc"));
-        store_run(dir.path(), &sample("abc", 8)).unwrap();
-        assert!(has_run(dir.path(), "abc"));
+        assert!(!has_run(dir.path(), &hash('a')));
+        store_run(dir.path(), &sample(&hash('a'), 8)).unwrap();
+        assert!(has_run(dir.path(), &hash('a')));
     }
 
     #[test]
     fn clean_removes_runs_directory() {
         let dir = tempdir().unwrap();
-        store_run(dir.path(), &sample("abc", 8)).unwrap();
+        store_run(dir.path(), &sample(&hash('a'), 8)).unwrap();
         clean_cache(dir.path()).unwrap();
         assert!(!dir.path().join(".runs").exists());
     }
@@ -192,15 +211,27 @@ mod tests {
     #[test]
     fn prune_removes_oldest_entries_first() {
         let dir = tempdir().unwrap();
-        store_run(dir.path(), &sample("a", 256)).unwrap();
+        store_run(dir.path(), &sample(&hash('a'), 256)).unwrap();
         std::thread::sleep(std::time::Duration::from_millis(10));
-        store_run(dir.path(), &sample("b", 256)).unwrap();
+        store_run(dir.path(), &sample(&hash('b'), 256)).unwrap();
         std::thread::sleep(std::time::Duration::from_millis(10));
-        store_run(dir.path(), &sample("c", 256)).unwrap();
+        store_run(dir.path(), &sample(&hash('c'), 256)).unwrap();
 
         prune_cache_by_size(dir.path(), 1_400).unwrap();
-        assert!(!has_run(dir.path(), "a"));
-        assert!(has_run(dir.path(), "b"));
-        assert!(has_run(dir.path(), "c"));
+        assert!(!has_run(dir.path(), &hash('a')));
+        assert!(has_run(dir.path(), &hash('c')));
+    }
+
+    #[test]
+    fn rejects_invalid_hash_on_load() {
+        let dir = tempdir().unwrap();
+        let err = load_run(dir.path(), "../escape").unwrap_err();
+        assert!(err.to_string().contains("invalid run hash"));
+    }
+
+    #[test]
+    fn has_run_returns_false_for_invalid_hash() {
+        let dir = tempdir().unwrap();
+        assert!(!has_run(dir.path(), "../escape"));
     }
 }
