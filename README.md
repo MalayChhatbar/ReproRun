@@ -56,6 +56,10 @@ cargo clippy --workspace --all-targets -- -D warnings
 cargo test --workspace
 ```
 
+## Documentation
+
+See [docs/README.md](docs/README.md) for full project documentation.
+
 ## License
 
 MIT
