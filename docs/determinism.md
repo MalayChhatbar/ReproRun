@@ -1,39 +1,105 @@
 # Determinism Model
 
-ReproRun v1 targets practical determinism with controlled inputs.
+ReproRun v1 is not a "perfect replay VM". It is a deterministic execution framework built around normalized inputs, explicit hashing, and repeated-run verification.
 
-## Controlled Inputs
+## What ReproRun Controls
 
-- Normalized environment (`LC_ALL=C`, `TZ=UTC`).
-- Seed/time injection via environment variables.
-- Explicit command and working directory.
-- Snapshot/hash of allowlisted input files.
+### Environment normalization
 
-## Hash Identity
+Every execution is launched with:
 
-Run hash includes:
+- a cleared environment baseline
+- `LC_ALL=C`
+- `TZ=UTC`
+- optional `REPRORUN_SEED`
+- optional `REPRORUN_TIME_EPOCH`
 
-- normalized command argv
+User-provided environment variables from config are then added on top.
+
+### Filesystem input set
+
+Deterministic file inputs come from the allowlist:
+
+- allowlisted files are hashed directly
+- allowlisted directories are walked recursively
+- paths are canonicalized before acceptance
+- paths must remain inside the repository base
+
+### Working directory
+
+- the effective working directory is canonicalized
+- it is included in the run hash
+
+### Config bytes
+
+- the config file content is included in the run hash
+
+### Git metadata fields
+
+The hash model includes git fields in the hash input structure:
+
+- `git_commit`
+- `git_dirty`
+
+Current note:
+
+- the hash layer supports these fields directly
+- whether and how they are populated depends on the current orchestration path
+
+## What ReproRun Hashes
+
+Current run hash inputs:
+
+- normalized command representation
 - normalized environment map
 - canonical working directory
-- config bytes
-- seed/time values
-- OS/arch/tool version metadata
-- git metadata
-- content of input files
+- raw config bytes
+- seed
+- time epoch
+- OS
+- architecture
+- ReproRun version
+- git metadata fields
+- canonical input file paths
+- input file contents
 
-## Reproducibility Check
+The current hashing algorithm is BLAKE3.
 
-`repro check` executes N runs and compares:
+## What `repro check` Verifies
 
-- `stdout` bytes
-- `stderr` bytes
+`repro check` does not compare hashes between runs. It compares execution outputs:
+
+- stdout bytes
+- stderr bytes
 - exit code
 
-Any mismatch marks the run as nondeterministic.
+If any of those differ across repeated runs, the execution is treated as nondeterministic.
 
-## Current Limits
+## Current Best-Effort Areas
 
-- No syscall-level time freezing in v1.
-- No OS-level random-device interception in v1.
-- Network is modeled in config but strict low-level blocking is best-effort in v1.
+ReproRun v1 does not yet guarantee:
+
+- syscall-level time freezing
+- interception of OS random devices
+- full kernel-level sandboxing
+- strict low-level network isolation
+- process-tree kill guarantees on every operating system
+
+Current timeout behavior:
+
+- Windows: explicit process-tree kill via `taskkill /T /F`
+- non-Windows: best-effort direct child kill
+
+## Practical Interpretation
+
+Today, ReproRun is strongest when:
+
+- your command behavior is mostly determined by config, env, working dir, and allowlisted files
+- your command is launched locally
+- you care about detecting nondeterminism, not proving formal replay equivalence
+
+It is weaker when:
+
+- the command consults hidden system state
+- the command reads undeclared files outside the allowlist
+- the command relies on external services or clocks not controlled by env configuration
