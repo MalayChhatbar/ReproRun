@@ -540,6 +540,7 @@ version = "0.1.0"
 dependencies = [
  "anyhow",
  "reprorun-config",
+ "thiserror",
 ]
 
 [[package]]
