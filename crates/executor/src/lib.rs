@@ -216,7 +216,7 @@ fn wait_with_timeout(
                             return Ok((status, false));
                         }
                         if Instant::now() >= grace_until {
-                            child.kill().map_err(ExecutorError::Io)?;
+                            kill_process_tree(child)?;
                             let status = child.wait().map_err(ExecutorError::Io)?;
                             return Ok((status, true));
                         }
@@ -227,6 +227,27 @@ fn wait_with_timeout(
             }
         }
     }
+}
+
+#[cfg(windows)]
+fn kill_process_tree(child: &mut std::process::Child) -> Result<(), ExecutorError> {
+    let status = Command::new("taskkill")
+        .args(["/PID", &child.id().to_string(), "/T", "/F"])
+        .stdin(Stdio::null())
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .status()
+        .map_err(ExecutorError::Io)?;
+    if status.success() {
+        Ok(())
+    } else {
+        child.kill().map_err(ExecutorError::Io)
+    }
+}
+
+#[cfg(not(windows))]
+fn kill_process_tree(child: &mut std::process::Child) -> Result<(), ExecutorError> {
+    child.kill().map_err(ExecutorError::Io)
 }
 
 struct CaptureResult {
@@ -401,5 +422,28 @@ mod tests {
         let out = execute(&req).unwrap();
         let text = String::from_utf8_lossy(&out.stdout);
         assert!(text.contains("secret-value"));
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn timeout_kills_spawned_child_processes() {
+        let dir = tempfile::tempdir().unwrap();
+        let marker = dir.path().join("marker.txt");
+        let marker_str = marker.display().to_string().replace('\'', "''");
+        let script = format!(
+            "Start-Process powershell -WindowStyle Hidden -ArgumentList '-NoProfile','-Command','Start-Sleep -Milliseconds 400; Set-Content -Path ''{marker_str}'' -Value orphan'; Start-Sleep -Seconds 5"
+        );
+
+        let req = ExecutionRequest {
+            command: platform_command(&script),
+            timeout_ms: Some(100),
+            stream_output: false,
+            ..ExecutionRequest::default()
+        };
+        let out = execute(&req).unwrap();
+        assert_eq!(out.exit_reason, ExitReason::TimeoutKilled);
+
+        thread::sleep(Duration::from_millis(800));
+        assert!(!marker.exists());
     }
 }

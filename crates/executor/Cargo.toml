@@ -9,3 +9,6 @@ license.workspace = true
 anyhow.workspace = true
 reprorun-config = { path = "../config" }
 thiserror.workspace = true
+
+[dev-dependencies]
+tempfile = "3.13"

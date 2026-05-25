@@ -46,6 +46,13 @@ pub fn load_run(base_dir: &Path, hash: &str) -> Result<Option<CachedRunData>> {
         .with_context(|| format!("failed to read config snapshot for run '{hash}'"))?;
     let env_json = fs::read_to_string(dir.join("env.json"))
         .with_context(|| format!("failed to read env snapshot for run '{hash}'"))?;
+    if metadata.hash != hash {
+        anyhow::bail!(
+            "run metadata hash mismatch: expected '{}', found '{}'",
+            hash,
+            metadata.hash
+        );
+    }
 
     Ok(Some(CachedRunData {
         metadata,
@@ -59,21 +66,65 @@ pub fn load_run(base_dir: &Path, hash: &str) -> Result<Option<CachedRunData>> {
 pub fn store_run(base_dir: &Path, run: &CachedRunData) -> Result<PathBuf> {
     validate_hash(&run.metadata.hash)?;
     let dir = run_dir(base_dir, &run.metadata.hash);
-    fs::create_dir_all(&dir).with_context(|| {
+    if dir.exists() {
+        return Ok(dir);
+    }
+
+    let parent = dir
+        .parent()
+        .context("failed to determine cache artifact parent directory")?;
+    fs::create_dir_all(parent).with_context(|| {
         format!(
-            "failed to create run artifact directory '{}'",
-            dir.display()
+            "failed to create run artifact parent directory '{}'",
+            parent.display()
+        )
+    })?;
+
+    let tmp_dir = parent.join(format!(
+        ".tmp-{}-{}",
+        run.metadata.hash,
+        std::time::SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .map(|d| d.as_nanos())
+            .unwrap_or(0)
+    ));
+    fs::create_dir_all(&tmp_dir).with_context(|| {
+        format!(
+            "failed to create temporary run artifact directory '{}'",
+            tmp_dir.display()
         )
     })?;
 
     fs::write(
-        dir.join("meta.json"),
+        tmp_dir.join("meta.json"),
         serde_json::to_vec_pretty(&run.metadata).context("failed to serialize run metadata")?,
     )?;
-    fs::write(dir.join("stdout.bin"), &run.stdout)?;
-    fs::write(dir.join("stderr.bin"), &run.stderr)?;
-    fs::write(dir.join("config.yaml"), &run.config_yaml)?;
-    fs::write(dir.join("env.json"), &run.env_json)?;
+    fs::write(tmp_dir.join("stdout.bin"), &run.stdout)?;
+    fs::write(tmp_dir.join("stderr.bin"), &run.stderr)?;
+    fs::write(tmp_dir.join("config.yaml"), &run.config_yaml)?;
+    fs::write(tmp_dir.join("env.json"), &run.env_json)?;
+    match fs::rename(&tmp_dir, &dir) {
+        Ok(()) => {}
+        Err(err) if dir.exists() => {
+            fs::remove_dir_all(&tmp_dir).with_context(|| {
+                format!(
+                    "failed to clean temporary run artifact directory '{}'",
+                    tmp_dir.display()
+                )
+            })?;
+            let _ = err;
+        }
+        Err(err) => {
+            fs::remove_dir_all(&tmp_dir).ok();
+            return Err(err).with_context(|| {
+                format!(
+                    "failed to promote temporary run artifact directory '{}' to '{}'",
+                    tmp_dir.display(),
+                    dir.display()
+                )
+            });
+        }
+    }
     Ok(dir)
 }
 
@@ -233,5 +284,23 @@ mod tests {
     fn has_run_returns_false_for_invalid_hash() {
         let dir = tempdir().unwrap();
         assert!(!has_run(dir.path(), "../escape"));
+    }
+
+    #[test]
+    fn rejects_metadata_hash_mismatch() {
+        let dir = tempdir().unwrap();
+        let path = store_run(dir.path(), &sample(&hash('a'), 8)).unwrap();
+        let tampered = serde_json::json!({
+            "hash": hash('b'),
+            "exit_code": 0,
+            "exit_reason": "exited",
+            "duration_ms": 12,
+            "stdout_truncated": false,
+            "stderr_truncated": false
+        });
+        fs::write(path.join("meta.json"), serde_json::to_vec_pretty(&tampered).unwrap()).unwrap();
+
+        let err = load_run(dir.path(), &hash('a')).unwrap_err();
+        assert!(err.to_string().contains("metadata hash mismatch"));
     }
 }
