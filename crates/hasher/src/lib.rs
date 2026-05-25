@@ -91,8 +91,8 @@ fn hash_run_input_from_canonical_strings(
     update_json(&mut hasher, "git_dirty", &input.git_dirty)?;
 
     for path in normalized_paths {
-        let bytes =
-            fs::read(path).with_context(|| format!("failed to read file while hashing input: {path}"))?;
+        let bytes = fs::read(path)
+            .with_context(|| format!("failed to read file while hashing input: {path}"))?;
         update_json(&mut hasher, "file_path", path)?;
         update_bytes(&mut hasher, "file_content", &bytes);
     }

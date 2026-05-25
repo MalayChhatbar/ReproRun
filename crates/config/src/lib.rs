@@ -353,7 +353,9 @@ check:
     #[test]
     fn rejects_empty_argv_command() {
         let err = ReproConfig::from_yaml_str("command: []").unwrap_err();
-        assert!(err.to_string().contains("command argv must contain at least one argument"));
+        assert!(err
+            .to_string()
+            .contains("command argv must contain at least one argument"));
     }
 
     #[test]
@@ -379,7 +381,10 @@ filesystem:
         .unwrap();
         assert_eq!(cfg.working_dir.unwrap(), PathBuf::from("./workspace"));
         assert_eq!(cfg.filesystem.allow, vec![PathBuf::from("./workspace/src")]);
-        assert_eq!(cfg.filesystem.deny, vec![PathBuf::from("./workspace/target")]);
+        assert_eq!(
+            cfg.filesystem.deny,
+            vec![PathBuf::from("./workspace/target")]
+        );
     }
 
     #[test]

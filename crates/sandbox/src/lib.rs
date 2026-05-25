@@ -298,7 +298,10 @@ filesystem:
     #[test]
     fn rejects_paths_outside_base_dir() {
         let dir = tempdir().unwrap();
-        let outside = std::env::temp_dir().display().to_string().replace('\\', "/");
+        let outside = std::env::temp_dir()
+            .display()
+            .to_string()
+            .replace('\\', "/");
         let cfg = ReproConfig::from_yaml_str(&format!(
             r#"
 command: ["echo", "ok"]
