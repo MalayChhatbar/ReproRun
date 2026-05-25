@@ -13,10 +13,12 @@ path = "src/main.rs"
 [dependencies]
 anyhow.workspace = true
 clap.workspace = true
+clap_complete = "4.5"
 reprorun-cache = { path = "../cache" }
 reprorun-config = { path = "../config" }
 reprorun-core = { path = "../core" }
 reprorun-reporter = { path = "../reporter" }
+serde.workspace = true
 serde_json.workspace = true
 
 [dev-dependencies]
