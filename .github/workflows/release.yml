@@ -1,0 +1,80 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-latest
+            target: x86_64-unknown-linux-gnu
+            archive_name: repro-linux-x86_64.tar.gz
+            binary_name: repro
+          - os: windows-latest
+            target: x86_64-pc-windows-msvc
+            archive_name: repro-windows-x86_64.zip
+            binary_name: repro.exe
+          - os: macos-latest
+            target: x86_64-apple-darwin
+            archive_name: repro-macos-x86_64.tar.gz
+            binary_name: repro
+
+    runs-on: ${{ matrix.os }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: 1.75.0
+          targets: ${{ matrix.target }}
+
+      - name: Build release binary
+        run: cargo build --release -p reprorun-cli --target ${{ matrix.target }}
+
+      - name: Package artifact (Unix)
+        if: runner.os != 'Windows'
+        run: |
+          mkdir -p dist
+          cp target/${{ matrix.target }}/release/${{ matrix.binary_name }} dist/
+          tar -czf dist/${{ matrix.archive_name }} -C dist ${{ matrix.binary_name }}
+
+      - name: Package artifact (Windows)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Path dist -Force | Out-Null
+          Copy-Item "target/${{ matrix.target }}/release/${{ matrix.binary_name }}" "dist/${{ matrix.binary_name }}"
+          Compress-Archive -Path "dist/${{ matrix.binary_name }}" -DestinationPath "dist/${{ matrix.archive_name }}" -Force
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.archive_name }}
+          path: dist/${{ matrix.archive_name }}
+
+  release:
+    runs-on: ubuntu-latest
+    needs: build
+    steps:
+      - name: Download artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: dist
+
+      - name: Publish GitHub release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            dist/**/*.tar.gz
+            dist/**/*.zip
+          generate_release_notes: true
