@@ -1,0 +1,21 @@
+command: ["powershell", "-NoProfile", "-Command", "Write-Output 'hello from ReproRun'"]
+
+env:
+  DEBUG: "false"
+
+filesystem:
+  mode: sandbox
+  allow:
+    - "examples"
+  snapshot_max_bytes: 104857600
+
+limits:
+  timeout_secs: 5
+  output_max_bytes: 10485760
+
+determinism:
+  seed: 42
+  time_epoch: 1700000000
+
+check:
+  runs: 3

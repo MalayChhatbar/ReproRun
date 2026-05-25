@@ -48,7 +48,11 @@ pub struct CheckOutcome {
     pub first_diff: Option<RunDiff>,
 }
 
-pub fn run_from_yaml(base_dir: &Path, config_yaml: &str, options: RunOptions) -> Result<RunOutcome> {
+pub fn run_from_yaml(
+    base_dir: &Path,
+    config_yaml: &str,
+    options: RunOptions,
+) -> Result<RunOutcome> {
     let cfg = ReproConfig::from_yaml_str(config_yaml)?;
     run_from_config(base_dir, &cfg, config_yaml, options)
 }
@@ -217,9 +221,17 @@ fn effective_working_dir(base_dir: &Path, cfg: &ReproConfig) -> Result<PathBuf> 
         .working_dir
         .clone()
         .unwrap_or_else(|| base_dir.to_path_buf());
-    let abs = if wd.is_absolute() { wd } else { base_dir.join(wd) };
-    abs.canonicalize()
-        .with_context(|| format!("failed to canonicalize working directory '{}'", abs.display()))
+    let abs = if wd.is_absolute() {
+        wd
+    } else {
+        base_dir.join(wd)
+    };
+    abs.canonicalize().with_context(|| {
+        format!(
+            "failed to canonicalize working directory '{}'",
+            abs.display()
+        )
+    })
 }
 
 fn normalize_command_for_hash(command: &CommandSpec) -> Vec<String> {
@@ -286,8 +298,8 @@ fn deterministic_seed(config_yaml: &str) -> u64 {
 }
 
 pub fn load_config_from_file(path: &Path) -> Result<String> {
-    Ok(fs::read_to_string(path)
-        .with_context(|| format!("failed to read config file '{}'", path.display()))?)
+    fs::read_to_string(path)
+        .with_context(|| format!("failed to read config file '{}'", path.display()))
 }
 
 #[cfg(test)]
