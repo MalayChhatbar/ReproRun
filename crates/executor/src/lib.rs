@@ -187,10 +187,6 @@ fn build_command(request: &ExecutionRequest) -> Result<Command, ExecutorError> {
     }
 
     for (k, v) in &request.env {
-        let upper = k.to_ascii_uppercase();
-        if upper.contains("TOKEN") || upper.contains("SECRET") || upper.contains("KEY") {
-            continue;
-        }
         cmd.env(k, v);
     }
 
@@ -384,5 +380,26 @@ mod tests {
         let out = execute(&req).unwrap();
         assert!(out.stdout_truncated);
         assert!(out.stdout.len() <= 100);
+    }
+
+    #[test]
+    fn preserves_user_provided_sensitive_named_env_vars() {
+        #[cfg(windows)]
+        let script = "Write-Output $env:API_KEY";
+        #[cfg(not(windows))]
+        let script = "printf \"$API_KEY\"";
+
+        let mut env = BTreeMap::new();
+        env.insert("API_KEY".to_string(), "secret-value".to_string());
+
+        let req = ExecutionRequest {
+            command: platform_command(script),
+            env,
+            stream_output: false,
+            ..ExecutionRequest::default()
+        };
+        let out = execute(&req).unwrap();
+        let text = String::from_utf8_lossy(&out.stdout);
+        assert!(text.contains("secret-value"));
     }
 }

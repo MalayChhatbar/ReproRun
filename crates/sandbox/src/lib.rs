@@ -15,6 +15,8 @@ pub enum SandboxError {
     DeniedPath { path: String },
     #[error("path '{path}' is outside allowlist")]
     OutsideAllowlist { path: String },
+    #[error("path '{path}' is outside repository base directory")]
+    OutsideBase { path: String },
     #[error("snapshot exceeds size limit: {actual} > {limit} bytes")]
     SnapshotTooLarge { actual: u64, limit: u64 },
     #[error("sandbox I/O failed: {0}")]
@@ -76,6 +78,13 @@ pub fn resolve_checked_path(
     allowlist: &[PathBuf],
     denylist: &[PathBuf],
 ) -> Result<PathBuf, SandboxError> {
+    let canonical_base =
+        base_dir
+            .canonicalize()
+            .map_err(|source| SandboxError::Canonicalize {
+                path: base_dir.display().to_string(),
+                source,
+            })?;
     let absolute_candidate = if candidate.is_absolute() {
         candidate.to_path_buf()
     } else {
@@ -88,6 +97,11 @@ pub fn resolve_checked_path(
                 path: candidate.display().to_string(),
                 source,
             })?;
+    if !resolved.starts_with(&canonical_base) {
+        return Err(SandboxError::OutsideBase {
+            path: resolved.display().to_string(),
+        });
+    }
 
     let resolved_deny = canonicalize_list(base_dir, denylist)?;
     if resolved_deny.iter().any(|deny| resolved.starts_with(deny)) {
@@ -142,7 +156,7 @@ fn copy_into_snapshot(
         })?;
     let mut copied = 0_u64;
     if source.is_file() {
-        let rel = relative_to_base(&canonical_base, source);
+        let rel = relative_to_base(&canonical_base, source)?;
         let dest = snapshot_root.join(rel);
         if let Some(parent) = dest.parent() {
             fs::create_dir_all(parent)?;
@@ -155,7 +169,7 @@ fn copy_into_snapshot(
     for entry in walkdir::WalkDir::new(source) {
         let entry = entry.map_err(|e| std::io::Error::other(e.to_string()))?;
         let path = entry.path();
-        let rel = relative_to_base(&canonical_base, path);
+        let rel = relative_to_base(&canonical_base, path)?;
         let dest = snapshot_root.join(rel);
         if entry.file_type().is_dir() {
             fs::create_dir_all(&dest)?;
@@ -170,13 +184,13 @@ fn copy_into_snapshot(
     Ok(copied)
 }
 
-fn relative_to_base(base: &Path, path: &Path) -> PathBuf {
-    if let Ok(rel) = path.strip_prefix(base) {
-        return rel.to_path_buf();
-    }
-    path.file_name()
-        .map(PathBuf::from)
-        .unwrap_or_else(|| PathBuf::from("unknown"))
+fn relative_to_base(base: &Path, path: &Path) -> Result<PathBuf, SandboxError> {
+    let rel = path
+        .strip_prefix(base)
+        .map_err(|_| SandboxError::OutsideBase {
+            path: path.display().to_string(),
+        })?;
+    Ok(rel.to_path_buf())
 }
 
 #[cfg(test)]
@@ -257,5 +271,24 @@ filesystem:
         let layout = prepare_sandbox(dir.path(), &cfg).unwrap();
         assert!(layout.snapshot_root.join("src").join("a.txt").exists());
         assert!(layout.total_snapshot_bytes > 0);
+    }
+
+    #[test]
+    fn rejects_paths_outside_base_dir() {
+        let dir = tempdir().unwrap();
+        let outside = std::env::temp_dir().display().to_string().replace('\\', "/");
+        let cfg = ReproConfig::from_yaml_str(&format!(
+            r#"
+command: ["echo", "ok"]
+filesystem:
+  mode: sandbox
+  allow:
+    - '{}'
+"#,
+            outside
+        ))
+        .unwrap();
+        let err = prepare_sandbox(dir.path(), &cfg).unwrap_err();
+        assert!(matches!(err, SandboxError::OutsideBase { .. }));
     }
 }

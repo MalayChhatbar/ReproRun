@@ -242,6 +242,9 @@ fn normalize_command_for_hash(command: &CommandSpec) -> Vec<String> {
 }
 
 fn collect_hash_input_files(base_dir: &Path, allow: &[PathBuf]) -> Result<Vec<PathBuf>> {
+    let canonical_base = base_dir
+        .canonicalize()
+        .with_context(|| format!("failed to canonicalize base dir '{}'", base_dir.display()))?;
     let mut files = Vec::new();
     for path in allow {
         let full = if path.is_absolute() {
@@ -249,12 +252,22 @@ fn collect_hash_input_files(base_dir: &Path, allow: &[PathBuf]) -> Result<Vec<Pa
         } else {
             base_dir.join(path)
         };
-        if full.is_file() {
-            files.push(full);
+        let canonical_full = full
+            .canonicalize()
+            .with_context(|| format!("failed to canonicalize allow path '{}'", full.display()))?;
+        if !canonical_full.starts_with(&canonical_base) {
+            return Err(anyhow!(
+                "allow path '{}' escapes base directory '{}'",
+                canonical_full.display(),
+                canonical_base.display()
+            ));
+        }
+        if canonical_full.is_file() {
+            files.push(canonical_full);
             continue;
         }
-        if full.is_dir() {
-            for entry in walkdir::WalkDir::new(&full) {
+        if canonical_full.is_dir() {
+            for entry in walkdir::WalkDir::new(&canonical_full) {
                 let entry = entry?;
                 if entry.file_type().is_file() {
                     files.push(entry.path().to_path_buf());
@@ -395,5 +408,31 @@ filesystem:
         assert_eq!(check.runs.len(), 3);
         assert!(!check.deterministic);
         assert!(check.first_diff.is_some());
+    }
+
+    #[test]
+    fn rejects_allow_paths_outside_base_dir() {
+        let dir = tempdir().unwrap();
+        let outside = std::env::temp_dir().display().to_string().replace('\\', "/");
+        let config = format!(
+            r#"
+command: ["echo", "ok"]
+filesystem:
+  mode: sandbox
+  allow:
+    - '{}'
+"#,
+            outside
+        );
+        let err = run_from_yaml(
+            dir.path(),
+            &config,
+            RunOptions {
+                use_cache: false,
+                stream_output: false,
+            },
+        )
+        .unwrap_err();
+        assert!(err.to_string().contains("outside repository base directory"));
     }
 }
