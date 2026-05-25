@@ -28,12 +28,17 @@ pub struct SandboxLayout {
     pub root: PathBuf,
     pub snapshot_root: PathBuf,
     pub total_snapshot_bytes: u64,
+    pub resolved_allow_paths: Vec<PathBuf>,
 }
 
 pub fn prepare_sandbox(
     base_dir: &Path,
     config: &ReproConfig,
 ) -> Result<SandboxLayout, SandboxError> {
+    let canonical_base = canonicalize_base_dir(base_dir)?;
+    let resolved_allow = canonicalize_list(base_dir, &config.filesystem.allow)?;
+    let resolved_deny = canonicalize_list(base_dir, &config.filesystem.deny)?;
+
     let tmp_root = base_dir.join("tmp").join("sandbox");
     fs::create_dir_all(&tmp_root)?;
     let run_id = std::time::SystemTime::now()
@@ -48,12 +53,12 @@ pub fn prepare_sandbox(
         config.filesystem.mode,
         FilesystemMode::Sandbox | FilesystemMode::Snapshot
     ) {
-        for allow in &config.filesystem.allow {
-            let resolved = resolve_checked_path(
-                base_dir,
-                allow,
-                &config.filesystem.allow,
-                &config.filesystem.deny,
+        for resolved in &resolved_allow {
+            let resolved = resolve_checked_path_with_resolved_lists(
+                &canonical_base,
+                resolved,
+                &resolved_allow,
+                &resolved_deny,
             )?;
             total = total.saturating_add(copy_into_snapshot(base_dir, &resolved, &snapshot_root)?);
             if total > config.filesystem.snapshot_max_bytes {
@@ -69,6 +74,7 @@ pub fn prepare_sandbox(
         root: tmp_root,
         snapshot_root,
         total_snapshot_bytes: total,
+        resolved_allow_paths: resolved_allow,
     })
 }
 
@@ -78,13 +84,7 @@ pub fn resolve_checked_path(
     allowlist: &[PathBuf],
     denylist: &[PathBuf],
 ) -> Result<PathBuf, SandboxError> {
-    let canonical_base =
-        base_dir
-            .canonicalize()
-            .map_err(|source| SandboxError::Canonicalize {
-                path: base_dir.display().to_string(),
-                source,
-            })?;
+    let canonical_base = canonicalize_base_dir(base_dir)?;
     let absolute_candidate = if candidate.is_absolute() {
         candidate.to_path_buf()
     } else {
@@ -97,20 +97,32 @@ pub fn resolve_checked_path(
                 path: candidate.display().to_string(),
                 source,
             })?;
-    if !resolved.starts_with(&canonical_base) {
+    let resolved_deny = canonicalize_list(base_dir, denylist)?;
+    let resolved_allow = canonicalize_list(base_dir, allowlist)?;
+    resolve_checked_path_with_resolved_lists(
+        &canonical_base,
+        &resolved,
+        &resolved_allow,
+        &resolved_deny,
+    )
+}
+
+fn resolve_checked_path_with_resolved_lists(
+    canonical_base: &Path,
+    resolved: &Path,
+    resolved_allow: &[PathBuf],
+    resolved_deny: &[PathBuf],
+) -> Result<PathBuf, SandboxError> {
+    if !resolved.starts_with(canonical_base) {
         return Err(SandboxError::OutsideBase {
             path: resolved.display().to_string(),
         });
     }
-
-    let resolved_deny = canonicalize_list(base_dir, denylist)?;
     if resolved_deny.iter().any(|deny| resolved.starts_with(deny)) {
         return Err(SandboxError::DeniedPath {
             path: resolved.display().to_string(),
         });
     }
-
-    let resolved_allow = canonicalize_list(base_dir, allowlist)?;
     if !resolved_allow.is_empty()
         && !resolved_allow
             .iter()
@@ -121,7 +133,7 @@ pub fn resolve_checked_path(
         });
     }
 
-    Ok(resolved)
+    Ok(resolved.to_path_buf())
 }
 
 fn canonicalize_list(base_dir: &Path, paths: &[PathBuf]) -> Result<Vec<PathBuf>, SandboxError> {
@@ -141,6 +153,15 @@ fn canonicalize_list(base_dir: &Path, paths: &[PathBuf]) -> Result<Vec<PathBuf>,
                 })
         })
         .collect()
+}
+
+fn canonicalize_base_dir(base_dir: &Path) -> Result<PathBuf, SandboxError> {
+    base_dir
+        .canonicalize()
+        .map_err(|source| SandboxError::Canonicalize {
+            path: base_dir.display().to_string(),
+            source,
+        })
 }
 
 fn copy_into_snapshot(
@@ -271,6 +292,7 @@ filesystem:
         let layout = prepare_sandbox(dir.path(), &cfg).unwrap();
         assert!(layout.snapshot_root.join("src").join("a.txt").exists());
         assert!(layout.total_snapshot_bytes > 0);
+        assert_eq!(layout.resolved_allow_paths.len(), 1);
     }
 
     #[test]

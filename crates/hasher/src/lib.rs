@@ -47,6 +47,30 @@ impl RunHashInput {
 }
 
 pub fn hash_run_input(input: &RunHashInput, input_paths: &[PathBuf]) -> Result<String> {
+    let mut normalized_paths = input_paths
+        .iter()
+        .map(|p| canonical_string(p))
+        .collect::<Result<Vec<_>>>()?;
+    normalized_paths.sort();
+    hash_run_input_from_canonical_strings(input, &normalized_paths)
+}
+
+pub fn hash_run_input_from_canonical_paths(
+    input: &RunHashInput,
+    input_paths: &[PathBuf],
+) -> Result<String> {
+    let mut normalized_paths = input_paths
+        .iter()
+        .map(|p| p.to_string_lossy().to_string())
+        .collect::<Vec<_>>();
+    normalized_paths.sort();
+    hash_run_input_from_canonical_strings(input, &normalized_paths)
+}
+
+fn hash_run_input_from_canonical_strings(
+    input: &RunHashInput,
+    normalized_paths: &[String],
+) -> Result<String> {
     let mut hasher = Hasher::new();
     hasher.update(b"reprorun-hash-v1");
 
@@ -66,16 +90,10 @@ pub fn hash_run_input(input: &RunHashInput, input_paths: &[PathBuf]) -> Result<S
     update_json(&mut hasher, "git_commit", &input.git_commit)?;
     update_json(&mut hasher, "git_dirty", &input.git_dirty)?;
 
-    let mut normalized_paths = input_paths
-        .iter()
-        .map(|p| canonical_string(p))
-        .collect::<Result<Vec<_>>>()?;
-    normalized_paths.sort();
-
     for path in normalized_paths {
-        let bytes = fs::read(&path)
-            .with_context(|| format!("failed to read file while hashing input: {path}"))?;
-        update_json(&mut hasher, "file_path", &path)?;
+        let bytes =
+            fs::read(path).with_context(|| format!("failed to read file while hashing input: {path}"))?;
+        update_json(&mut hasher, "file_path", path)?;
         update_bytes(&mut hasher, "file_content", &bytes);
     }
 
@@ -164,6 +182,19 @@ mod tests {
         input.env.insert("DEBUG".to_string(), "true".to_string());
         let second = hash_run_input(&input, &[file_path]).unwrap();
         assert_ne!(first, second);
+    }
+
+    #[test]
+    fn canonical_path_hash_matches_regular_hash() {
+        let dir = tempdir().unwrap();
+        let file_path = dir.path().join("input.txt");
+        fs::write(&file_path, "abc").unwrap();
+        let input = basic_input(dir.path().to_path_buf());
+        let canonical = file_path.canonicalize().unwrap();
+
+        let regular = hash_run_input(&input, std::slice::from_ref(&file_path)).unwrap();
+        let fast = hash_run_input_from_canonical_paths(&input, &[canonical]).unwrap();
+        assert_eq!(regular, fast);
     }
 
     proptest! {

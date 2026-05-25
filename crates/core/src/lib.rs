@@ -6,7 +6,7 @@ use anyhow::{anyhow, Context, Result};
 use reprorun_cache::{load_run, store_run, CachedRunData, RunMetadata};
 use reprorun_config::{CommandSpec, ReproConfig};
 use reprorun_executor::{execute, ExecutionRequest, ExecutionResult, ExitReason};
-use reprorun_hasher::{hash_run_input, RunHashInput};
+use reprorun_hasher::{hash_run_input_from_canonical_paths, RunHashInput};
 use reprorun_reporter::{diff_runs, ComparableRun, RunDiff};
 use reprorun_sandbox::prepare_sandbox;
 
@@ -63,7 +63,7 @@ pub fn run_from_config(
     config_yaml: &str,
     options: RunOptions,
 ) -> Result<RunOutcome> {
-    let _layout = prepare_sandbox(base_dir, cfg)?;
+    let layout = prepare_sandbox(base_dir, cfg)?;
     let working_dir = effective_working_dir(base_dir, cfg)?;
     let seed = cfg
         .determinism
@@ -72,7 +72,7 @@ pub fn run_from_config(
     let time_epoch = cfg.determinism.time_epoch.or(Some(0));
 
     let command_vec = normalize_command_for_hash(&cfg.command);
-    let input_files = collect_hash_input_files(base_dir, &cfg.filesystem.allow)?;
+    let input_files = collect_hash_input_files(&layout.resolved_allow_paths)?;
     let hash_input = RunHashInput::new(
         command_vec.clone(),
         normalize_env(&cfg.env),
@@ -81,7 +81,7 @@ pub fn run_from_config(
         Some(seed),
         time_epoch,
     );
-    let run_hash = hash_run_input(&hash_input, &input_files)?;
+    let run_hash = hash_run_input_from_canonical_paths(&hash_input, &input_files)?;
 
     if options.use_cache {
         if let Some(cached) = load_run(base_dir, &run_hash)? {
@@ -241,33 +241,15 @@ fn normalize_command_for_hash(command: &CommandSpec) -> Vec<String> {
     }
 }
 
-fn collect_hash_input_files(base_dir: &Path, allow: &[PathBuf]) -> Result<Vec<PathBuf>> {
-    let canonical_base = base_dir
-        .canonicalize()
-        .with_context(|| format!("failed to canonicalize base dir '{}'", base_dir.display()))?;
+fn collect_hash_input_files(allow: &[PathBuf]) -> Result<Vec<PathBuf>> {
     let mut files = Vec::new();
-    for path in allow {
-        let full = if path.is_absolute() {
-            path.clone()
-        } else {
-            base_dir.join(path)
-        };
-        let canonical_full = full
-            .canonicalize()
-            .with_context(|| format!("failed to canonicalize allow path '{}'", full.display()))?;
-        if !canonical_full.starts_with(&canonical_base) {
-            return Err(anyhow!(
-                "allow path '{}' escapes base directory '{}'",
-                canonical_full.display(),
-                canonical_base.display()
-            ));
-        }
-        if canonical_full.is_file() {
-            files.push(canonical_full);
+    for canonical_path in allow {
+        if canonical_path.is_file() {
+            files.push(canonical_path.clone());
             continue;
         }
-        if canonical_full.is_dir() {
-            for entry in walkdir::WalkDir::new(&canonical_full) {
+        if canonical_path.is_dir() {
+            for entry in walkdir::WalkDir::new(canonical_path) {
                 let entry = entry?;
                 if entry.file_type().is_file() {
                     files.push(entry.path().to_path_buf());
