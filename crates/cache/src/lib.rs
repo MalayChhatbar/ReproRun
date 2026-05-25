@@ -24,6 +24,17 @@ pub struct CachedRunData {
     pub env_json: String,
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct RunSummary {
+    pub hash: String,
+    pub exit_code: Option<i32>,
+    pub exit_reason: String,
+    pub duration_ms: u128,
+    pub stdout_bytes: usize,
+    pub stderr_bytes: usize,
+    pub modified_unix_millis: u128,
+}
+
 fn run_dir(base_dir: &Path, hash: &str) -> PathBuf {
     base_dir.join(".runs").join(hash)
 }
@@ -85,7 +96,9 @@ pub fn store_run(base_dir: &Path, run: &CachedRunData) -> Result<PathBuf> {
         }
     }
 
-    let parent = dir.parent().context("failed to determine cache artifact parent directory")?;
+    let parent = dir
+        .parent()
+        .context("failed to determine cache artifact parent directory")?;
     fs::create_dir_all(parent).with_context(|| {
         format!(
             "failed to create run artifact parent directory '{}'",
@@ -148,10 +161,60 @@ pub fn has_run(base_dir: &Path, hash: &str) -> bool {
     run_dir(base_dir, hash).exists()
 }
 
+pub fn list_runs(base_dir: &Path) -> Result<Vec<RunSummary>> {
+    let runs_dir = validate_cache_root(base_dir, false)?;
+    if !runs_dir.exists() {
+        return Ok(Vec::new());
+    }
+
+    let mut runs = Vec::new();
+    for entry in fs::read_dir(&runs_dir)? {
+        let entry = entry?;
+        if !entry.file_type()?.is_dir() {
+            continue;
+        }
+
+        let hash = entry.file_name().to_string_lossy().to_string();
+        if validate_hash(&hash).is_err() {
+            continue;
+        }
+
+        let Some(run) = load_run(base_dir, &hash)? else {
+            continue;
+        };
+        let modified_unix_millis = entry
+            .metadata()
+            .ok()
+            .and_then(|meta| meta.modified().ok())
+            .and_then(|ts| ts.duration_since(UNIX_EPOCH).ok())
+            .map(|dur| dur.as_millis())
+            .unwrap_or(0);
+
+        runs.push(RunSummary {
+            hash,
+            exit_code: run.metadata.exit_code,
+            exit_reason: run.metadata.exit_reason,
+            duration_ms: run.metadata.duration_ms,
+            stdout_bytes: run.stdout.len(),
+            stderr_bytes: run.stderr.len(),
+            modified_unix_millis,
+        });
+    }
+
+    runs.sort_by(|left, right| {
+        right
+            .modified_unix_millis
+            .cmp(&left.modified_unix_millis)
+            .then_with(|| left.hash.cmp(&right.hash))
+    });
+    Ok(runs)
+}
+
 pub fn clean_cache(base_dir: &Path) -> Result<()> {
     let runs_dir = validate_cache_root(base_dir, false)?;
     if runs_dir.exists() {
-        fs::remove_dir_all(&runs_dir).with_context(|| format!("failed to remove '{}'", runs_dir.display()))?;
+        fs::remove_dir_all(&runs_dir)
+            .with_context(|| format!("failed to remove '{}'", runs_dir.display()))?;
     }
     Ok(())
 }
@@ -221,9 +284,12 @@ fn validate_hash(hash: &str) -> Result<()> {
 }
 
 fn validate_cache_root(base_dir: &Path, create_if_missing: bool) -> Result<PathBuf> {
-    let canonical_base = base_dir
-        .canonicalize()
-        .with_context(|| format!("failed to canonicalize base directory '{}'", base_dir.display()))?;
+    let canonical_base = base_dir.canonicalize().with_context(|| {
+        format!(
+            "failed to canonicalize base directory '{}'",
+            base_dir.display()
+        )
+    })?;
     let runs_dir = base_dir.join(".runs");
     if create_if_missing && !runs_dir.exists() {
         fs::create_dir_all(&runs_dir)
@@ -246,12 +312,18 @@ fn validate_cache_root(base_dir: &Path, create_if_missing: bool) -> Result<PathB
 }
 
 fn validate_run_dir(cache_root: &Path, dir: &Path) -> Result<()> {
-    let canonical_root = cache_root
-        .canonicalize()
-        .with_context(|| format!("failed to canonicalize cache root '{}'", cache_root.display()))?;
-    let canonical_dir = dir
-        .canonicalize()
-        .with_context(|| format!("failed to canonicalize run artifact directory '{}'", dir.display()))?;
+    let canonical_root = cache_root.canonicalize().with_context(|| {
+        format!(
+            "failed to canonicalize cache root '{}'",
+            cache_root.display()
+        )
+    })?;
+    let canonical_dir = dir.canonicalize().with_context(|| {
+        format!(
+            "failed to canonicalize run artifact directory '{}'",
+            dir.display()
+        )
+    })?;
     if !canonical_dir.starts_with(&canonical_root) {
         anyhow::bail!(
             "run artifact directory '{}' escapes cache root '{}'",
@@ -352,7 +424,11 @@ mod tests {
             "stdout_truncated": false,
             "stderr_truncated": false
         });
-        fs::write(path.join("meta.json"), serde_json::to_vec_pretty(&tampered).unwrap()).unwrap();
+        fs::write(
+            path.join("meta.json"),
+            serde_json::to_vec_pretty(&tampered).unwrap(),
+        )
+        .unwrap();
 
         let err = load_run(dir.path(), &hash('a')).unwrap_err();
         assert!(err.to_string().contains("metadata hash mismatch"));
@@ -388,5 +464,19 @@ mod tests {
         let dir = tempdir().unwrap();
         prune_cache_by_size(dir.path(), 1).unwrap();
         assert!(!dir.path().join(".runs").exists());
+    }
+
+    #[test]
+    fn list_runs_returns_newest_first() {
+        let dir = tempdir().unwrap();
+        store_run(dir.path(), &sample(&hash('a'), 8)).unwrap();
+        std::thread::sleep(std::time::Duration::from_millis(10));
+        store_run(dir.path(), &sample(&hash('b'), 4)).unwrap();
+
+        let runs = list_runs(dir.path()).unwrap();
+        assert_eq!(runs.len(), 2);
+        assert_eq!(runs[0].hash, hash('b'));
+        assert_eq!(runs[0].stdout_bytes, 4);
+        assert_eq!(runs[1].hash, hash('a'));
     }
 }

@@ -1,6 +1,7 @@
 use std::collections::BTreeMap;
 use std::fs;
 use std::path::{Path, PathBuf};
+use std::process::{Command, Stdio};
 
 use anyhow::{anyhow, Context, Result};
 use reprorun_cache::{load_run, store_run, CachedRunData, RunMetadata};
@@ -48,6 +49,31 @@ pub struct CheckOutcome {
     pub first_diff: Option<RunDiff>,
 }
 
+#[derive(Debug, Clone)]
+pub struct HashExplanation {
+    pub hash: String,
+    pub command: Vec<String>,
+    pub env: BTreeMap<String, String>,
+    pub working_dir: PathBuf,
+    pub seed: u64,
+    pub time_epoch: Option<i64>,
+    pub input_files: Vec<PathBuf>,
+    pub git_commit: Option<String>,
+    pub git_dirty: bool,
+}
+
+#[derive(Debug, Clone)]
+struct PreparedRun {
+    hash: String,
+    command: Vec<String>,
+    env: BTreeMap<String, String>,
+    working_dir: PathBuf,
+    seed: u64,
+    time_epoch: Option<i64>,
+    input_files: Vec<PathBuf>,
+    hash_input: RunHashInput,
+}
+
 pub fn run_from_yaml(
     base_dir: &Path,
     config_yaml: &str,
@@ -63,30 +89,12 @@ pub fn run_from_config(
     config_yaml: &str,
     options: RunOptions,
 ) -> Result<RunOutcome> {
-    let layout = prepare_sandbox(base_dir, cfg)?;
-    let working_dir = effective_working_dir(base_dir, cfg)?;
-    let seed = cfg
-        .determinism
-        .seed
-        .unwrap_or_else(|| deterministic_seed(config_yaml));
-    let time_epoch = cfg.determinism.time_epoch.or(Some(0));
-
-    let command_vec = normalize_command_for_hash(&cfg.command);
-    let input_files = collect_hash_input_files(&layout.resolved_allow_paths)?;
-    let hash_input = RunHashInput::new(
-        command_vec.clone(),
-        normalize_env(&cfg.env),
-        working_dir.clone(),
-        config_yaml.as_bytes().to_vec(),
-        Some(seed),
-        time_epoch,
-    );
-    let run_hash = hash_run_input_from_canonical_paths(&hash_input, &input_files)?;
+    let prepared = prepare_run(base_dir, cfg, config_yaml)?;
 
     if options.use_cache {
-        if let Some(cached) = load_run(base_dir, &run_hash)? {
+        if let Some(cached) = load_run(base_dir, &prepared.hash)? {
             return Ok(RunOutcome {
-                hash: run_hash,
+                hash: prepared.hash,
                 from_cache: true,
                 result: ExecutionLikeResult {
                     stdout: cached.stdout,
@@ -99,30 +107,30 @@ pub fn run_from_config(
         }
     }
 
-    let mut exec_env = normalize_env(&cfg.env);
-    exec_env.insert("REPRORUN_SEED".to_string(), seed.to_string());
-    if let Some(epoch) = time_epoch {
+    let mut exec_env = prepared.env.clone();
+    exec_env.insert("REPRORUN_SEED".to_string(), prepared.seed.to_string());
+    if let Some(epoch) = prepared.time_epoch {
         exec_env.insert("REPRORUN_TIME_EPOCH".to_string(), epoch.to_string());
     }
 
     let exec_req = ExecutionRequest {
         command: cfg.command.clone(),
-        working_dir: Some(working_dir),
+        working_dir: Some(prepared.working_dir.clone()),
         env: exec_env.clone(),
         stdin: cfg.stdin.clone().map(|s| s.into_bytes()),
         timeout_ms: cfg.limits.timeout_secs.map(|s| s.saturating_mul(1000)),
         output_max_bytes: cfg.limits.output_max_bytes,
         stream_output: options.stream_output,
         allow_shell: false,
-        seed: Some(seed),
-        time_epoch,
+        seed: Some(prepared.seed),
+        time_epoch: prepared.time_epoch,
     };
     let result = execute(&exec_req)?;
     let result_like = from_execution_result(&result);
 
     let cached = CachedRunData {
         metadata: RunMetadata {
-            hash: run_hash.clone(),
+            hash: prepared.hash.clone(),
             exit_code: result_like.exit_code,
             exit_reason: result_like.exit_reason.clone(),
             duration_ms: result_like.duration_ms,
@@ -137,9 +145,33 @@ pub fn run_from_config(
     store_run(base_dir, &cached)?;
 
     Ok(RunOutcome {
-        hash: run_hash,
+        hash: prepared.hash,
         from_cache: false,
         result: result_like,
+    })
+}
+
+pub fn explain_hash_from_yaml(base_dir: &Path, config_yaml: &str) -> Result<HashExplanation> {
+    let cfg = ReproConfig::from_yaml_str(config_yaml)?;
+    explain_hash_from_config(base_dir, &cfg, config_yaml)
+}
+
+pub fn explain_hash_from_config(
+    base_dir: &Path,
+    cfg: &ReproConfig,
+    config_yaml: &str,
+) -> Result<HashExplanation> {
+    let prepared = prepare_run(base_dir, cfg, config_yaml)?;
+    Ok(HashExplanation {
+        hash: prepared.hash,
+        command: prepared.command,
+        env: prepared.env,
+        working_dir: prepared.working_dir,
+        seed: prepared.seed,
+        time_epoch: prepared.time_epoch,
+        input_files: prepared.input_files,
+        git_commit: prepared.hash_input.git_commit,
+        git_dirty: prepared.hash_input.git_dirty,
     })
 }
 
@@ -216,6 +248,43 @@ fn normalize_env(input: &BTreeMap<String, String>) -> BTreeMap<String, String> {
     out
 }
 
+fn prepare_run(base_dir: &Path, cfg: &ReproConfig, config_yaml: &str) -> Result<PreparedRun> {
+    let layout = prepare_sandbox(base_dir, cfg)?;
+    let working_dir = effective_working_dir(base_dir, cfg)?;
+    let seed = cfg
+        .determinism
+        .seed
+        .unwrap_or_else(|| deterministic_seed(config_yaml));
+    let time_epoch = cfg.determinism.time_epoch.or(Some(0));
+    let command = normalize_command_for_hash(&cfg.command);
+    let env = normalize_env(&cfg.env);
+    let input_files = collect_hash_input_files(&layout.resolved_allow_paths)?;
+
+    let mut hash_input = RunHashInput::new(
+        command.clone(),
+        env.clone(),
+        working_dir.clone(),
+        config_yaml.as_bytes().to_vec(),
+        Some(seed),
+        time_epoch,
+    );
+    let (git_commit, git_dirty) = read_git_metadata(base_dir);
+    hash_input.git_commit = git_commit;
+    hash_input.git_dirty = git_dirty;
+    let hash = hash_run_input_from_canonical_paths(&hash_input, &input_files)?;
+
+    Ok(PreparedRun {
+        hash,
+        command,
+        env,
+        working_dir,
+        seed,
+        time_epoch,
+        input_files,
+        hash_input,
+    })
+}
+
 fn effective_working_dir(base_dir: &Path, cfg: &ReproConfig) -> Result<PathBuf> {
     let wd = cfg
         .working_dir
@@ -290,6 +359,34 @@ fn deterministic_seed(config_yaml: &str) -> u64 {
     u64::from_le_bytes([
         bytes[0], bytes[1], bytes[2], bytes[3], bytes[4], bytes[5], bytes[6], bytes[7],
     ])
+}
+
+fn read_git_metadata(base_dir: &Path) -> (Option<String>, bool) {
+    let git_commit = Command::new("git")
+        .args(["rev-parse", "HEAD"])
+        .current_dir(base_dir)
+        .stdin(Stdio::null())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::null())
+        .output()
+        .ok()
+        .filter(|output| output.status.success())
+        .map(|output| String::from_utf8_lossy(&output.stdout).trim().to_string())
+        .filter(|commit| !commit.is_empty());
+
+    let git_dirty = Command::new("git")
+        .args(["status", "--porcelain", "--untracked-files=no"])
+        .current_dir(base_dir)
+        .stdin(Stdio::null())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::null())
+        .output()
+        .ok()
+        .filter(|output| output.status.success())
+        .map(|output| !output.stdout.is_empty())
+        .unwrap_or(false);
+
+    (git_commit, git_dirty)
 }
 
 pub fn load_config_from_file(path: &Path) -> Result<String> {
@@ -395,7 +492,10 @@ filesystem:
     #[test]
     fn rejects_allow_paths_outside_base_dir() {
         let dir = tempdir().unwrap();
-        let outside = std::env::temp_dir().display().to_string().replace('\\', "/");
+        let outside = std::env::temp_dir()
+            .display()
+            .to_string()
+            .replace('\\', "/");
         let config = format!(
             r#"
 command: ["echo", "ok"]
@@ -415,7 +515,9 @@ filesystem:
             },
         )
         .unwrap_err();
-        assert!(err.to_string().contains("outside repository base directory"));
+        assert!(err
+            .to_string()
+            .contains("outside repository base directory"));
     }
 
     #[test]
@@ -485,5 +587,29 @@ filesystem:
         let loaded = load_config_from_file(&path).unwrap();
         assert!(loaded.contains("command:"));
         assert!(loaded.contains("echo"));
+    }
+
+    #[test]
+    fn explain_hash_reports_seed_and_input_files() {
+        let dir = tempdir().unwrap();
+        let input = dir.path().join("input.txt");
+        fs::write(&input, "abc").unwrap();
+        let config = r#"
+command: ["echo", "ok"]
+filesystem:
+  mode: sandbox
+  allow:
+    - input.txt
+"#;
+
+        let explained = explain_hash_from_yaml(dir.path(), config).unwrap();
+        assert_eq!(
+            explained.command,
+            vec!["echo".to_string(), "ok".to_string()]
+        );
+        assert_eq!(explained.time_epoch, Some(0));
+        assert_eq!(explained.input_files.len(), 1);
+        assert_eq!(explained.input_files[0], input.canonicalize().unwrap());
+        assert!(!explained.hash.is_empty());
     }
 }

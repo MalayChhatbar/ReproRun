@@ -1,5 +1,7 @@
 use std::collections::BTreeMap;
 use std::io::{Read, Write};
+#[cfg(unix)]
+use std::os::unix::process::CommandExt;
 use std::process::{Command, Stdio};
 use std::sync::mpsc;
 use std::thread;
@@ -194,6 +196,16 @@ fn build_command(request: &ExecutionRequest) -> Result<Command, ExecutorError> {
         cmd.current_dir(dir);
     }
 
+    #[cfg(unix)]
+    unsafe {
+        cmd.pre_exec(|| {
+            if libc::setsid() == -1 {
+                return Err(std::io::Error::last_os_error());
+            }
+            Ok(())
+        });
+    }
+
     Ok(cmd)
 }
 
@@ -247,7 +259,17 @@ fn kill_process_tree(child: &mut std::process::Child) -> Result<(), ExecutorErro
 
 #[cfg(not(windows))]
 fn kill_process_tree(child: &mut std::process::Child) -> Result<(), ExecutorError> {
-    child.kill().map_err(ExecutorError::Io)
+    let pgid = child.id() as i32;
+    let rc = unsafe { libc::killpg(pgid, libc::SIGKILL) };
+    if rc == 0 {
+        Ok(())
+    } else {
+        let err = std::io::Error::last_os_error();
+        match err.raw_os_error() {
+            Some(code) if code == libc::ESRCH => Ok(()),
+            _ => child.kill().map_err(ExecutorError::Io),
+        }
+    }
 }
 
 struct CaptureResult {
@@ -383,6 +405,31 @@ mod tests {
         };
         let out = execute(&req).unwrap();
         assert_eq!(out.exit_reason, ExitReason::TimeoutKilled);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn timeout_kills_unix_process_group() {
+        let dir = tempfile::tempdir().unwrap();
+        let marker = dir.path().join("marker.txt");
+        let req = ExecutionRequest {
+            command: CommandSpec::Argv(vec![
+                "sh".to_string(),
+                "-c".to_string(),
+                format!(
+                    "(sleep 0.2; printf child > '{}') & sleep 1",
+                    marker.display()
+                ),
+            ]),
+            timeout_ms: Some(50),
+            stream_output: false,
+            ..ExecutionRequest::default()
+        };
+
+        let out = execute(&req).unwrap();
+        assert_eq!(out.exit_reason, ExitReason::TimeoutKilled);
+        thread::sleep(Duration::from_millis(400));
+        assert!(!marker.exists(), "background child survived timeout");
     }
 
     #[test]
