@@ -1,0 +1,14 @@
+# Rust
+/target/
+**/*.rs.bk
+
+# ReproRun artifacts
+.runs/
+.cache/
+tmp/
+
+# Editor and OS
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/

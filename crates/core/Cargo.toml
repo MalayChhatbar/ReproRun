@@ -1,0 +1,15 @@
+[package]
+name = "reprorun-core"
+version = "0.1.0"
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+
+[dependencies]
+anyhow.workspace = true
+reprorun-cache = { path = "../cache" }
+reprorun-config = { path = "../config" }
+reprorun-executor = { path = "../executor" }
+reprorun-hasher = { path = "../hasher" }
+reprorun-reporter = { path = "../reporter" }
+reprorun-sandbox = { path = "../sandbox" }
