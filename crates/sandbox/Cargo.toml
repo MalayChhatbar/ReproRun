@@ -8,3 +8,8 @@ license.workspace = true
 [dependencies]
 anyhow.workspace = true
 reprorun-config = { path = "../config" }
+thiserror.workspace = true
+walkdir.workspace = true
+
+[dev-dependencies]
+tempfile = "3.13"
