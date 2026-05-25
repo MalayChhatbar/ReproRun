@@ -511,6 +511,7 @@ dependencies = [
  "reprorun-core",
  "reprorun-reporter",
  "serde_json",
+ "tempfile",
 ]
 
 [[package]]
