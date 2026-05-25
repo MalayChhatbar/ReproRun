@@ -47,6 +47,7 @@ ReproRun v1 does not assume:
 - environment is explicitly cleared and rebuilt
 - deterministic baseline env vars are always injected
 - timeout handling on Windows kills the process tree via `taskkill /T /F`
+- timeout handling on Unix creates a fresh session and kills the process group with `SIGKILL`
 
 ### Reporting
 
@@ -63,10 +64,6 @@ That means:
 - commands can still access host capabilities outside of what the current OS and executor behavior prevent
 - network isolation is not a hardened boundary in v1
 
-### Non-Windows timeout behavior
-
-On non-Windows platforms, timeout cleanup is still best-effort direct-child termination.
-
 ### Hidden host dependencies
 
 Commands can still depend on undeclared host state if they access it directly outside the declared allowlist model.
@@ -74,6 +71,19 @@ Commands can still depend on undeclared host state if they access it directly ou
 ### Cache authenticity
 
 Current cache hardening protects against boundary escape and obvious corruption. It does not yet provide signed artifact authenticity.
+
+### Not a security sandbox
+
+The current filesystem sandbox should be read as a reproducibility feature, not a hostile-code containment feature.
+
+It helps define inputs and stage snapshots, but it does not replace:
+
+- containers
+- seccomp
+- Linux namespaces
+- AppArmor or SELinux
+- macOS sandbox profiles
+- a VM boundary
 
 ## Guidance for Users
 

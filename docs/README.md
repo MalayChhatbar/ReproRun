@@ -8,6 +8,8 @@ This directory documents the current MVP implementation, not an aspirational fut
 - [configuration.md](configuration.md): strict YAML schema, defaults, interpolation behavior, and validation rules
 - [cli.md](cli.md): command reference, exit behavior, output modes, and examples
 - [determinism.md](determinism.md): what ReproRun controls, what is hashed, and what remains best-effort
+- [recipes/README.md](recipes/README.md): copy-paste usage guides for Python, Node, Rust, CI, and cache debugging
+- [../case-studies/README.md](../case-studies/README.md): practical debugging narratives using the current CLI
 
 ## Operational Docs
 
@@ -21,5 +23,5 @@ This directory documents the current MVP implementation, not an aspirational fut
 
 1. Start with [architecture.md](architecture.md).
 2. Read [configuration.md](configuration.md) and [cli.md](cli.md) if you want to use the tool.
-3. Read [determinism.md](determinism.md) and [security.md](security.md) if you need to understand guarantees and limits.
+3. Read [determinism.md](determinism.md), [security.md](security.md), and [recipes/README.md](recipes/README.md) if you plan to use the tool on a real project.
 4. Read [testing.md](testing.md) and [development.md](development.md) before contributing code.

@@ -2,11 +2,11 @@
 
 Binary name: `repro`
 
-The CLI is intentionally non-interactive and CI-friendly.
+The CLI is intentionally non-interactive and CI-friendly. Successful commands write useful output to stdout. Configuration, runtime, and command-resolution failures exit with status `2`.
 
 ## Version Output
 
-`repro --version` includes build metadata:
+`repro --version` includes:
 
 - crate version
 - full git commit
@@ -17,11 +17,11 @@ The CLI is intentionally non-interactive and CI-friendly.
 ## Global Flags
 
 - `-q`, `--quiet`
-  - suppresses streamed command output during `run`
+  - suppresses streamed child-process output during `repro run`
 - `-v`
-  - currently parsed and reserved for future verbosity control
+  - parsed and reserved for future verbosity levels
 
-## Commands
+## Command Reference
 
 ### `repro init [path] [--force]`
 
@@ -43,7 +43,7 @@ Behavior:
 
 ### `repro run [config] [--no-cache] [--json]`
 
-Execute a configuration once.
+Execute one configuration.
 
 Examples:
 
@@ -60,6 +60,7 @@ Text output includes:
 - `from_cache`
 - `exit_code`
 - `exit_reason`
+- a note when the result came from cache rather than a fresh execution
 
 JSON output includes:
 
@@ -71,12 +72,12 @@ JSON output includes:
 
 Exit behavior:
 
-- returns `0` when the command ran or a cached artifact was returned successfully
-- returns `2` on CLI/config/runtime errors
+- `0` when execution succeeds or a cached artifact is returned
+- `2` on CLI/config/runtime failures
 
 ### `repro check [config] [--runs N] [--json]`
 
-Execute the same config repeatedly and compare results.
+Execute the same config repeatedly and compare observed results.
 
 Examples:
 
@@ -94,9 +95,9 @@ Comparison fields:
 
 Exit behavior:
 
-- returns `0` when all repeated runs match
-- returns `1` when nondeterminism is detected
-- returns `2` on CLI/config/runtime errors
+- `0` when all repeated runs match
+- `1` when nondeterminism is detected
+- `2` on CLI/config/runtime failures
 
 ### `repro diff <left-hash> <right-hash> [--json] [--no-color]`
 
@@ -118,9 +119,118 @@ Current diff scope:
 
 Exit behavior:
 
-- returns `0` when no differences exist
-- returns `1` when differences exist
-- returns `2` on invalid input or load errors
+- `0` when no differences exist
+- `1` when differences exist
+- `2` on invalid input or cache-load failures
+
+### `repro inspect <hash> [--json]`
+
+Inspect one cached run artifact.
+
+Examples:
+
+```powershell
+repro inspect <hash>
+repro inspect <hash> --json
+```
+
+Human output includes:
+
+- hash
+- exit code
+- exit reason
+- duration
+- stdout/stderr byte sizes
+- truncation flags
+- stored config snapshot
+- stored environment snapshot
+
+### `repro list [--limit N] [--json]`
+
+List cached runs in most-recent-first order.
+
+Examples:
+
+```powershell
+repro list
+repro list --limit 5
+repro list --json
+```
+
+Current summary fields:
+
+- hash
+- exit code
+- exit reason
+- duration
+- stdout/stderr byte sizes
+- cache entry modified time in Unix milliseconds
+
+### `repro doctor [--json]`
+
+Report repository-local health information.
+
+Examples:
+
+```powershell
+repro doctor
+repro doctor --json
+```
+
+Current checks:
+
+- current working directory
+- whether `repro.yaml` is present
+- number of cached runs
+- whether git metadata is available
+- current git commit
+- whether the tracked working tree is dirty
+- warnings for missing config or missing git context
+
+### `repro hash explain [config] [--json]`
+
+Show the current hash inputs for one configuration.
+
+Examples:
+
+```powershell
+repro hash explain
+repro hash explain examples/repro.yaml
+repro hash explain repro.yaml --json
+```
+
+Current explanation fields:
+
+- final hash
+- normalized command
+- effective working directory
+- effective seed
+- effective time epoch
+- normalized environment
+- resolved input files
+- git commit
+- git dirty state
+
+This command explains what is currently being hashed. It does not yet compute a before/after delta between two different configurations.
+
+### `repro completions <shell>`
+
+Generate shell completions.
+
+Supported shells:
+
+- `bash`
+- `elvish`
+- `fish`
+- `powershell`
+- `zsh`
+
+Examples:
+
+```powershell
+repro completions powershell > repro.ps1
+repro completions bash > repro.bash
+```
 
 ### `repro cache clean`
 
