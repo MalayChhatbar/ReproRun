@@ -417,4 +417,73 @@ filesystem:
         .unwrap_err();
         assert!(err.to_string().contains("outside repository base directory"));
     }
+
+    #[test]
+    fn check_reports_deterministic_for_stable_command() {
+        let dir = tempdir().unwrap();
+        let config = platform_stable_command_yaml();
+        write_config(dir.path(), config);
+
+        let check = check_from_yaml(dir.path(), config, Some(2)).unwrap();
+        assert!(check.deterministic);
+        assert!(check.first_diff.is_none());
+        assert_eq!(check.runs.len(), 2);
+    }
+
+    #[test]
+    fn diff_runs_by_hash_reports_output_difference() {
+        let dir = tempdir().unwrap();
+        let left_hash = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
+        let right_hash = "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb";
+
+        store_run(
+            dir.path(),
+            &CachedRunData {
+                metadata: RunMetadata {
+                    hash: left_hash.to_string(),
+                    exit_code: Some(0),
+                    exit_reason: "exited".to_string(),
+                    duration_ms: 1,
+                    stdout_truncated: false,
+                    stderr_truncated: false,
+                },
+                stdout: b"left".to_vec(),
+                stderr: Vec::new(),
+                config_yaml: "command: ['echo']".to_string(),
+                env_json: "{}".to_string(),
+            },
+        )
+        .unwrap();
+        store_run(
+            dir.path(),
+            &CachedRunData {
+                metadata: RunMetadata {
+                    hash: right_hash.to_string(),
+                    exit_code: Some(0),
+                    exit_reason: "exited".to_string(),
+                    duration_ms: 1,
+                    stdout_truncated: false,
+                    stderr_truncated: false,
+                },
+                stdout: b"right".to_vec(),
+                stderr: Vec::new(),
+                config_yaml: "command: ['echo']".to_string(),
+                env_json: "{}".to_string(),
+            },
+        )
+        .unwrap();
+
+        let diff = diff_runs_by_hash(dir.path(), left_hash, right_hash).unwrap();
+        assert!(diff.different);
+        assert!(diff.stdout.different);
+    }
+
+    #[test]
+    fn load_config_from_file_round_trips_content() {
+        let dir = tempdir().unwrap();
+        let path = write_config(dir.path(), "command: ['echo', 'ok']");
+        let loaded = load_config_from_file(&path).unwrap();
+        assert!(loaded.contains("command:"));
+        assert!(loaded.contains("echo"));
+    }
 }

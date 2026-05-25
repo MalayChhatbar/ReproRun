@@ -424,6 +424,66 @@ mod tests {
         assert!(text.contains("secret-value"));
     }
 
+    #[test]
+    fn rejects_empty_argv_command() {
+        let err = execute(&ExecutionRequest::default()).unwrap_err();
+        assert!(matches!(err, ExecutorError::EmptyCommand));
+    }
+
+    #[test]
+    fn captures_stderr_output() {
+        #[cfg(windows)]
+        let script = "Write-Error 'boom'";
+        #[cfg(not(windows))]
+        let script = "printf boom 1>&2";
+
+        let req = ExecutionRequest {
+            command: platform_command(script),
+            stream_output: false,
+            ..ExecutionRequest::default()
+        };
+        let out = execute(&req).unwrap();
+        let text = String::from_utf8_lossy(&out.stderr);
+        assert!(text.to_ascii_lowercase().contains("boom"));
+    }
+
+    #[test]
+    fn injects_seed_and_time_epoch_env_vars() {
+        #[cfg(windows)]
+        let script = "Write-Output \"$env:REPRORUN_SEED,$env:REPRORUN_TIME_EPOCH\"";
+        #[cfg(not(windows))]
+        let script = "printf \"$REPRORUN_SEED,$REPRORUN_TIME_EPOCH\"";
+
+        let req = ExecutionRequest {
+            command: platform_command(script),
+            seed: Some(7),
+            time_epoch: Some(11),
+            stream_output: false,
+            ..ExecutionRequest::default()
+        };
+        let out = execute(&req).unwrap();
+        let text = String::from_utf8_lossy(&out.stdout);
+        assert!(text.contains("7,11"));
+    }
+
+    #[test]
+    fn zero_output_limit_truncates_all_output() {
+        #[cfg(windows)]
+        let script = "Write-Output 'hello'";
+        #[cfg(not(windows))]
+        let script = "printf hello";
+
+        let req = ExecutionRequest {
+            command: platform_command(script),
+            output_max_bytes: 0,
+            stream_output: false,
+            ..ExecutionRequest::default()
+        };
+        let out = execute(&req).unwrap();
+        assert!(out.stdout_truncated);
+        assert!(out.stdout.is_empty());
+    }
+
     #[cfg(windows)]
     #[test]
     fn timeout_kills_spawned_child_processes() {

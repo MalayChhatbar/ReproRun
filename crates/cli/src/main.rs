@@ -298,4 +298,19 @@ mod tests {
         assert!(LONG_VERSION.contains("tag:"));
         assert!(LONG_VERSION.contains("dirty:"));
     }
+
+    #[test]
+    fn default_config_template_is_valid_repro_config() {
+        let cfg = reprorun_config::ReproConfig::from_yaml_str(default_config_template()).unwrap();
+        assert_eq!(cfg.check.runs, 3);
+        assert_eq!(cfg.filesystem.snapshot_max_bytes, 104_857_600);
+    }
+
+    #[test]
+    fn init_creates_missing_parent_directories() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let path = dir.path().join("nested").join("configs").join("repro.yaml");
+        write_default_config(&path, false).expect("write config");
+        assert!(path.exists());
+    }
 }

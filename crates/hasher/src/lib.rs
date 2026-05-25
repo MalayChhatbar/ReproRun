@@ -197,6 +197,33 @@ mod tests {
         assert_eq!(regular, fast);
     }
 
+    #[test]
+    fn hash_changes_when_git_metadata_changes() {
+        let dir = tempdir().unwrap();
+        let file_path = dir.path().join("input.txt");
+        fs::write(&file_path, "abc").unwrap();
+        let mut input = basic_input(dir.path().to_path_buf());
+
+        let first = hash_run_input(&input, std::slice::from_ref(&file_path)).unwrap();
+        input.git_dirty = true;
+        let second = hash_run_input(&input, &[file_path]).unwrap();
+        assert_ne!(first, second);
+    }
+
+    #[test]
+    fn hash_is_stable_for_reordered_file_inputs() {
+        let dir = tempdir().unwrap();
+        let file_a = dir.path().join("a.txt");
+        let file_b = dir.path().join("b.txt");
+        fs::write(&file_a, "a").unwrap();
+        fs::write(&file_b, "b").unwrap();
+        let input = basic_input(dir.path().to_path_buf());
+
+        let first = hash_run_input(&input, &[file_a.clone(), file_b.clone()]).unwrap();
+        let second = hash_run_input(&input, &[file_b, file_a]).unwrap();
+        assert_eq!(first, second);
+    }
+
     proptest! {
         #[test]
         fn hash_stable_for_reordered_env_insertion(kv in prop::collection::btree_map("[A-Z]{1,8}", "[a-z0-9]{0,12}", 1..12)) {

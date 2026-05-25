@@ -1,4 +1,3 @@
-use colored::Colorize;
 use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -136,11 +135,11 @@ fn decorate_diff(text: &str, color: bool) -> String {
     let mut out = String::new();
     for line in text.lines() {
         let rendered = if line.starts_with("+++") || line.starts_with("---") {
-            line.bold().to_string()
+            format!("\u{1b}[1m{line}\u{1b}[0m")
         } else if line.starts_with('+') {
-            line.green().to_string()
+            format!("\u{1b}[32m{line}\u{1b}[0m")
         } else if line.starts_with('-') {
-            line.red().to_string()
+            format!("\u{1b}[31m{line}\u{1b}[0m")
         } else {
             line.to_string()
         };
@@ -207,5 +206,68 @@ mod tests {
         let diff = diff_runs(&a, &b);
         let json = render_diff_json(&diff).unwrap();
         assert!(json.contains("\"different\": true"));
+    }
+
+    #[test]
+    fn reports_exit_code_diff() {
+        let a = ComparableRun {
+            id: "run-a".to_string(),
+            exit_code: Some(0),
+            stdout: Vec::new(),
+            stderr: Vec::new(),
+        };
+        let b = ComparableRun {
+            id: "run-b".to_string(),
+            exit_code: Some(2),
+            stdout: Vec::new(),
+            stderr: Vec::new(),
+        };
+        let diff = diff_runs(&a, &b);
+        assert!(diff.exit_code.different);
+        let human = render_diff_human(&diff, false);
+        assert!(human.contains("## Exit Code"));
+        assert!(human.contains("-Some(0)"));
+        assert!(human.contains("+Some(2)"));
+    }
+
+    #[test]
+    fn reports_stderr_diff() {
+        let a = ComparableRun {
+            id: "run-a".to_string(),
+            exit_code: Some(0),
+            stdout: Vec::new(),
+            stderr: b"warn\n".to_vec(),
+        };
+        let b = ComparableRun {
+            id: "run-b".to_string(),
+            exit_code: Some(0),
+            stdout: Vec::new(),
+            stderr: b"error\n".to_vec(),
+        };
+        let diff = diff_runs(&a, &b);
+        assert!(diff.stderr.different);
+        let human = render_diff_human(&diff, false);
+        assert!(human.contains("## Stderr"));
+        assert!(human.contains("-warn"));
+        assert!(human.contains("+error"));
+    }
+
+    #[test]
+    fn color_rendering_includes_ansi_sequences() {
+        let a = ComparableRun {
+            id: "run-a".to_string(),
+            exit_code: Some(0),
+            stdout: b"a\n".to_vec(),
+            stderr: Vec::new(),
+        };
+        let b = ComparableRun {
+            id: "run-b".to_string(),
+            exit_code: Some(0),
+            stdout: b"b\n".to_vec(),
+            stderr: Vec::new(),
+        };
+        let diff = diff_runs(&a, &b);
+        let colored = render_diff_human(&diff, true);
+        assert!(colored.contains('\u{1b}'));
     }
 }

@@ -313,4 +313,49 @@ filesystem:
         let err = prepare_sandbox(dir.path(), &cfg).unwrap_err();
         assert!(matches!(err, SandboxError::OutsideBase { .. }));
     }
+
+    #[test]
+    fn read_only_mode_skips_snapshot_copy() {
+        let dir = tempdir().unwrap();
+        let src = dir.path().join("src");
+        fs::create_dir_all(&src).unwrap();
+        fs::write(src.join("a.txt"), "ok").unwrap();
+
+        let cfg = ReproConfig::from_yaml_str(
+            r#"
+command: ["echo", "ok"]
+filesystem:
+  mode: read_only
+  allow:
+    - "src"
+"#,
+        )
+        .unwrap();
+        let layout = prepare_sandbox(dir.path(), &cfg).unwrap();
+        assert_eq!(layout.total_snapshot_bytes, 0);
+        assert!(!layout.snapshot_root.join("src").join("a.txt").exists());
+        assert_eq!(layout.resolved_allow_paths.len(), 1);
+    }
+
+    #[test]
+    fn snapshot_limit_is_enforced() {
+        let dir = tempdir().unwrap();
+        let src = dir.path().join("src");
+        fs::create_dir_all(&src).unwrap();
+        fs::write(src.join("a.txt"), "0123456789").unwrap();
+
+        let cfg = ReproConfig::from_yaml_str(
+            r#"
+command: ["echo", "ok"]
+filesystem:
+  mode: sandbox
+  allow:
+    - "src"
+  snapshot_max_bytes: 1
+"#,
+        )
+        .unwrap();
+        let err = prepare_sandbox(dir.path(), &cfg).unwrap_err();
+        assert!(matches!(err, SandboxError::SnapshotTooLarge { .. }));
+    }
 }

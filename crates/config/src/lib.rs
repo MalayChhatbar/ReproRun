@@ -262,6 +262,8 @@ fn interpolate_env(input: &str) -> Result<String, ConfigError> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::io::ErrorKind;
+    use tempfile::tempdir;
 
     #[test]
     fn parses_minimal_config_with_defaults() {
@@ -334,5 +336,60 @@ check:
         )
         .unwrap_err();
         assert!(err.to_string().contains("check.runs must be >= 1"));
+    }
+
+    #[test]
+    fn load_from_path_reports_missing_file() {
+        let dir = tempdir().unwrap();
+        let err = ReproConfig::load_from_path(&dir.path().join("missing.yaml")).unwrap_err();
+        match err {
+            ConfigError::ReadFile { source, .. } => {
+                assert_eq!(source.kind(), ErrorKind::NotFound);
+            }
+            other => panic!("unexpected error: {other}"),
+        }
+    }
+
+    #[test]
+    fn rejects_empty_argv_command() {
+        let err = ReproConfig::from_yaml_str("command: []").unwrap_err();
+        assert!(err.to_string().contains("command argv must contain at least one argument"));
+    }
+
+    #[test]
+    fn rejects_empty_shell_command() {
+        let err = ReproConfig::from_yaml_str("command: \"   \"").unwrap_err();
+        assert!(err.to_string().contains("shell command must not be empty"));
+    }
+
+    #[test]
+    fn interpolates_working_dir_and_filesystem_paths() {
+        std::env::set_var("REPRO_TEST_PATH_SEGMENT", "workspace");
+        let cfg = ReproConfig::from_yaml_str(
+            r#"
+command: ["echo", "ok"]
+working_dir: "./${REPRO_TEST_PATH_SEGMENT}"
+filesystem:
+  allow:
+    - "./${REPRO_TEST_PATH_SEGMENT}/src"
+  deny:
+    - "./${REPRO_TEST_PATH_SEGMENT}/target"
+"#,
+        )
+        .unwrap();
+        assert_eq!(cfg.working_dir.unwrap(), PathBuf::from("./workspace"));
+        assert_eq!(cfg.filesystem.allow, vec![PathBuf::from("./workspace/src")]);
+        assert_eq!(cfg.filesystem.deny, vec![PathBuf::from("./workspace/target")]);
+    }
+
+    #[test]
+    fn interpolation_fails_for_missing_closing_brace() {
+        let err = ReproConfig::from_yaml_str(
+            r#"
+command: ["echo", "${BROKEN"]
+"#,
+        )
+        .unwrap_err();
+        assert!(err.to_string().contains("missing closing brace"));
     }
 }

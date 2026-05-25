@@ -369,4 +369,24 @@ mod tests {
         let loaded = load_run(dir.path(), &hash('a')).unwrap().unwrap();
         assert_eq!(loaded.metadata.hash, hash('a'));
     }
+
+    #[test]
+    fn store_run_is_idempotent_for_existing_valid_artifact() {
+        let dir = tempdir().unwrap();
+        let run = sample(&hash('a'), 8);
+        let path = store_run(dir.path(), &run).unwrap();
+        fs::write(path.join("stdout.bin"), b"custom").unwrap();
+
+        let second_path = store_run(dir.path(), &run).unwrap();
+        assert_eq!(path, second_path);
+        let loaded = load_run(dir.path(), &hash('a')).unwrap().unwrap();
+        assert_eq!(loaded.stdout, b"custom");
+    }
+
+    #[test]
+    fn prune_is_noop_when_runs_directory_is_missing() {
+        let dir = tempdir().unwrap();
+        prune_cache_by_size(dir.path(), 1).unwrap();
+        assert!(!dir.path().join(".runs").exists());
+    }
 }
