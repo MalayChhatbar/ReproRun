@@ -59,6 +59,7 @@ cargo test --workspace
 ## Documentation
 
 See [docs/README.md](docs/README.md) for full project documentation.
+For repository bootstrapping steps, see [docs/github.md](docs/github.md).
 
 ## License
 
