@@ -1,14 +1,25 @@
 # Rust
 /target/
 **/*.rs.bk
+*.pdb
 
 # ReproRun artifacts
 .runs/
 .cache/
 tmp/
+coverage/
+*.profraw
+*.profdata
 
 # Editor and OS
 .DS_Store
 Thumbs.db
 .idea/
 .vscode/
+*.swp
+*.swo
+
+# Environment and local overrides
+.env
+.env.*
+!.env.example
